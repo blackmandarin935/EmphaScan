@@ -375,7 +375,8 @@ const collectRepeatedTokens = (text, minCount, minToken) => {
     .filter(({ token, index }) =>
       token.valid &&
       unigramCounts.get(token.normalized) >= minCount &&
-      !usedTokenIndexes.has(index)
+      !usedTokenIndexes.has(index) &&
+      !repeatedPhraseTokens.has(token.normalized)
     )
     .map(({ token }) => ({ start: token.start, end: token.end }));
 

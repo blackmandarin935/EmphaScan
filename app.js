@@ -16,7 +16,53 @@ const emphasisKeywords = [
   "유의",
   "주의",
   "명심",
+  "기억",
+  "주의할",
+  "주의해야",
+  "유념",
+  "중요한",
+  "핵심은",
+  "핵심은 바로",
+  "핵심적으로",
+  "가장 중요한",
+  "가장 중요한 것은",
+  "가장 중요한 점",
+  "반드시 기억",
+  "꼭 기억",
+  "잊지 말",
+  "주의 깊게",
+  "유의할 점",
+  "유의할 사항",
+  "특히",
+  "특별히",
+  "특히 중요한",
+  "특히 유의",
+  "중요 포인트",
+  "중요한 점",
+  "중요한 것은",
+  "요점은",
+  "요점은 바로",
+  "요약하면",
+  "정리하면",
+  "다시 말해",
+  "즉",
+  "바꿔 말하면",
+  "결국",
+  "그러므로",
+  "따라서",
+  "그렇기에",
+  "결과적으로",
   "결론적으로",
+  "요컨대",
+  "한마디로",
+  "한 줄 요약",
+  "포인트는",
+  "포인트는 바로",
+  "결정적인",
+  "핵심 메시지",
+  "필수 사항",
+  "필수로",
+  "반드시 해야",
   "가장 중요",
   "바로",
 ];
@@ -151,8 +197,6 @@ const escapeHTML = (value) =>
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
 
-const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
 const collectRangesFromPattern = (text, regex, label, type) => {
   const ranges = [];
   let match = null;
@@ -189,75 +233,99 @@ const collectContextSentenceRanges = (text) => {
   return ranges;
 };
 
-const mergeRanges = (ranges) => {
-  const sorted = [...ranges].sort((a, b) => a.start - b.start || a.end - b.end);
-  const merged = [];
-  for (const range of sorted) {
-    const last = merged[merged.length - 1];
-    if (!last || range.start > last.end) {
-      merged.push({
-        ...range,
-        labels: new Set([range.label]),
-        types: new Set([range.type]),
-      });
-      continue;
+const particlePattern = /(은|는|이|가|을|를|과|와|의|에|에서|에게|께서|으로|로|로서|로써|보다|부터|까지|밖에|조차|마저|만|도|뿐|이나|나)$/;
+
+const normalizeToken = (token) => {
+  const lower = token.toLowerCase();
+  if (/[가-힣]/.test(lower)) {
+    let trimmed = lower;
+    let previous = null;
+    while (trimmed !== previous) {
+      previous = trimmed;
+      trimmed = trimmed.replace(particlePattern, "");
     }
-    last.end = Math.max(last.end, range.end);
-    last.labels.add(range.label);
-    last.types.add(range.type);
+    return trimmed;
   }
-  return merged.map((item) => ({
-    ...item,
-    labels: Array.from(item.labels),
-    types: Array.from(item.types),
-  }));
+  return lower;
 };
 
-const highlightText = (text, ranges) => {
-  if (ranges.length === 0) return `<p class="placeholder">문맥 강조 또는 반복된 항목이 없습니다.</p>`;
-  let cursor = 0;
-  let html = "";
-  for (const range of ranges) {
-    if (range.start > cursor) {
-      html += escapeHTML(text.slice(cursor, range.start));
-    }
-    const content = escapeHTML(text.slice(range.start, range.end));
-    const typeClass = range.types.includes("repeat") ? "repeat" : "context";
-    const tooltip = escapeHTML(range.labels.join(", "));
-    html += `<span class="highlight ${typeClass}" title="${tooltip}">${content}</span>`;
-    cursor = range.end;
+const buildHighlightedHTML = (text, contextRanges, repeatRanges) => {
+  const allRanges = [...contextRanges, ...repeatRanges];
+  if (allRanges.length === 0) return `<p class="placeholder">문맥 강조 또는 반복된 항목이 없습니다.</p>`;
+
+  const boundaries = new Set([0, text.length]);
+  for (const range of allRanges) {
+    boundaries.add(range.start);
+    boundaries.add(range.end);
   }
-  html += escapeHTML(text.slice(cursor));
+  const points = Array.from(boundaries).sort((a, b) => a - b);
+  const sortedContext = [...contextRanges].sort((a, b) => a.start - b.start);
+  const sortedRepeat = [...repeatRanges].sort((a, b) => a.start - b.start);
+
+  let contextIndex = 0;
+  let repeatIndex = 0;
+  let activeContext = [];
+  let activeRepeat = [];
+  let html = "";
+
+  for (let i = 0; i < points.length - 1; i += 1) {
+    const start = points[i];
+    const end = points[i + 1];
+    if (start === end) continue;
+
+    while (contextIndex < sortedContext.length && sortedContext[contextIndex].start <= start) {
+      if (sortedContext[contextIndex].end > start) activeContext.push(sortedContext[contextIndex]);
+      contextIndex += 1;
+    }
+    activeContext = activeContext.filter((range) => range.end > start);
+
+    while (repeatIndex < sortedRepeat.length && sortedRepeat[repeatIndex].start <= start) {
+      if (sortedRepeat[repeatIndex].end > start) activeRepeat.push(sortedRepeat[repeatIndex]);
+      repeatIndex += 1;
+    }
+    activeRepeat = activeRepeat.filter((range) => range.end > start);
+
+    const segment = escapeHTML(text.slice(start, end));
+    if (!segment) continue;
+
+    const hasRepeat = activeRepeat.length > 0;
+    const hasContext = activeContext.length > 0;
+    if (!hasRepeat && !hasContext) {
+      html += segment;
+      continue;
+    }
+
+    const labels = new Set();
+    if (hasContext) activeContext.forEach((range) => labels.add(range.label));
+    if (hasRepeat) activeRepeat.forEach((range) => labels.add(range.label));
+    const typeClass = hasRepeat ? "repeat" : "context";
+    html += `<span class="highlight ${typeClass}" title="${escapeHTML(Array.from(labels).join(", "))}">${segment}</span>`;
+  }
+
   return html;
 };
 
 const collectRepeatedTokens = (text, minCount, minToken) => {
   const tokenRegex = /[A-Za-z][A-Za-z'\-]{1,}|[가-힣]{2,}/g;
-  const tokens = text.match(tokenRegex) || [];
   const counts = new Map();
-  const positions = new Map();
+  const entries = [];
+  let match = null;
 
-  for (const token of tokens) {
-    const normalized = token.toLowerCase();
+  while ((match = tokenRegex.exec(text)) !== null) {
+    const token = match[0];
+    const normalized = normalizeToken(token);
+    if (!normalized) continue;
     if (normalized.length < minToken) continue;
     if (stopwords.has(normalized)) continue;
     counts.set(normalized, (counts.get(normalized) || 0) + 1);
+    entries.push({ start: match.index, end: match.index + token.length, token, normalized });
   }
 
-  for (const [token, count] of counts.entries()) {
-    if (count < minCount) continue;
-    const escaped = escapeRegExp(token);
-    const isEnglish = /[a-z]/.test(token);
-    const regex = isEnglish ? new RegExp(`\\b${escaped}\\b`, "gi") : new RegExp(escaped, "g");
-    let match = null;
-    while ((match = regex.exec(text)) !== null) {
-      const range = { start: match.index, end: match.index + match[0].length };
-      const key = `${range.start}-${range.end}`;
-      if (!positions.has(key)) positions.set(key, range);
-    }
-  }
+  const ranges = entries
+    .filter((entry) => counts.get(entry.normalized) >= minCount)
+    .map((entry) => ({ start: entry.start, end: entry.end }));
 
-  return { counts, ranges: Array.from(positions.values()) };
+  return { counts, ranges };
 };
 
 const renderSummary = (stats, contextItems, repeatedItems) => {
@@ -285,7 +353,6 @@ const analyzeText = () => {
     summaryStats.innerHTML = "";
     emphasisList.innerHTML = "";
     repeatList.innerHTML = "";
-    rulesList.innerHTML = "";
     return;
   }
 
@@ -297,6 +364,7 @@ const analyzeText = () => {
   );
 
   const sentenceRanges = collectContextSentenceRanges(text);
+  const allContextRanges = [...contextRanges, ...sentenceRanges];
 
   const { counts, ranges: repeatRanges } = collectRepeatedTokens(text, minRepeat, minToken);
   const repeatRangeObjects = repeatRanges.map((range) => ({
@@ -306,15 +374,9 @@ const analyzeText = () => {
     snippet: text.slice(range.start, range.end),
   }));
 
-  const mergedRanges = mergeRanges([
-    ...contextRanges,
-    ...sentenceRanges,
-    ...repeatRangeObjects,
-  ]);
+  highlightedOutput.innerHTML = buildHighlightedHTML(text, allContextRanges, repeatRangeObjects);
 
-  highlightedOutput.innerHTML = highlightText(text, mergedRanges);
-
-  const contextItems = [...contextRanges, ...sentenceRanges]
+  const contextItems = allContextRanges
     .map((range) => `${range.label}: ${range.snippet}`)
     .slice(0, 20);
   const repeatedItems = Array.from(counts.entries())

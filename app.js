@@ -427,7 +427,7 @@ const analyzeText = () => {
   }
 
   const minRepeat = Math.max(2, Number(minRepeatInput.value) || 2);
-  const minToken = Math.max(2, Number(minTokenInput.value) || 2);
+  const minToken = Math.max(1, Number(minTokenInput.value) || 1);
 
   const contextRanges = contextPatterns.flatMap((pattern) =>
     collectRangesFromPattern(text, pattern.regex, pattern.label, "context")

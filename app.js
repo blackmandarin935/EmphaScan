@@ -4,7 +4,6 @@ const highlightedOutput = document.getElementById("highlightedOutput");
 const summaryStats = document.getElementById("summaryStats");
 const emphasisList = document.getElementById("emphasisList");
 const repeatList = document.getElementById("repeatList");
-const rulesList = document.getElementById("rulesList");
 const minRepeatInput = document.getElementById("minRepeat");
 const minTokenInput = document.getElementById("minToken");
 
@@ -23,6 +22,23 @@ const emphasisKeywords = [
 ];
 
 const stopwords = new Set([
+  "나",
+  "너",
+  "저",
+  "우리",
+  "너희",
+  "그들",
+  "이들",
+  "그들",
+  "이것",
+  "그것",
+  "저것",
+  "누구",
+  "모두",
+  "아무",
+  "여기",
+  "거기",
+  "저기",
   "그리고",
   "그러나",
   "그래서",
@@ -39,8 +55,54 @@ const stopwords = new Set([
   "합니다",
   "있습니다",
   "있어요",
+  "있다",
+  "있어",
+  "있어요",
+  "없다",
+  "없어요",
+  "하다",
+  "해요",
+  "합니다",
+  "하는",
+  "했다",
+  "된다",
+  "되다",
+  "되요",
+  "되어",
+  "된다",
   "없는",
   "있는",
+  "이다",
+  "이고",
+  "이며",
+  "이라",
+  "라고",
+  "이라서",
+  "이라는",
+  "그리고",
+  "또한",
+  "또",
+  "즉",
+  "또는",
+  "같은",
+  "처럼",
+  "에서",
+  "에게",
+  "한테",
+  "께서",
+  "부터",
+  "까지",
+  "으로",
+  "로서",
+  "로써",
+  "보다",
+  "마다",
+  "밖에",
+  "조차",
+  "마저",
+  "등",
+  "등등",
+  "정도",
   "the",
   "and",
   "for",
@@ -54,18 +116,17 @@ const stopwords = new Set([
   "has",
   "have",
   "your",
+  "you",
+  "your",
+  "ours",
+  "their",
+  "them",
+  "she",
+  "he",
+  "they",
+  "his",
+  "her",
 ]);
-
-const emphasisPatterns = [
-  { label: "굵게", regex: /\*\*([\s\S]*?)\*\*/g },
-  { label: "기울임", regex: /\*([^*\n][\s\S]*?)\*/g },
-  { label: "밑줄", regex: /__([\s\S]*?)__/g },
-  { label: "하이라이트", regex: /==([\s\S]*?)==/g },
-  { label: "strong 태그", regex: /<strong>([\s\S]*?)<\/strong>/gi },
-  { label: "em 태그", regex: /<em>([\s\S]*?)<\/em>/gi },
-  { label: "mark 태그", regex: /<mark>([\s\S]*?)<\/mark>/gi },
-  { label: "u 태그", regex: /<u>([\s\S]*?)<\/u>/gi },
-];
 
 const contextPatterns = [
   {
@@ -153,7 +214,7 @@ const mergeRanges = (ranges) => {
 };
 
 const highlightText = (text, ranges) => {
-  if (ranges.length === 0) return `<p class="placeholder">강조 또는 반복된 항목이 없습니다.</p>`;
+  if (ranges.length === 0) return `<p class="placeholder">문맥 강조 또는 반복된 항목이 없습니다.</p>`;
   let cursor = 0;
   let html = "";
   for (const range of ranges) {
@@ -161,11 +222,7 @@ const highlightText = (text, ranges) => {
       html += escapeHTML(text.slice(cursor, range.start));
     }
     const content = escapeHTML(text.slice(range.start, range.end));
-    const typeClass = range.types.includes("repeat")
-      ? "repeat"
-      : range.types.includes("context")
-      ? "context"
-      : "emphasis";
+    const typeClass = range.types.includes("repeat") ? "repeat" : "context";
     const tooltip = escapeHTML(range.labels.join(", "));
     html += `<span class="highlight ${typeClass}" title="${tooltip}">${content}</span>`;
     cursor = range.end;
@@ -203,33 +260,21 @@ const collectRepeatedTokens = (text, minCount, minToken) => {
   return { counts, ranges: Array.from(positions.values()) };
 };
 
-const renderSummary = (stats, emphasisItems, repeatedItems) => {
+const renderSummary = (stats, contextItems, repeatedItems) => {
   summaryStats.innerHTML = `
     <h3>통계</h3>
-    <div><span class="tag">강조</span> ${stats.emphasis}</div>
-    <div><span class="tag">문맥</span> ${stats.context}</div>
+    <div><span class="tag">문맥 강조</span> ${stats.context}</div>
     <div><span class="tag">반복</span> ${stats.repeat}</div>
   `;
 
   emphasisList.innerHTML = `
-    <h3>강조된 항목</h3>
-    ${emphasisItems.length ? `<ul>${emphasisItems.map((item) => `<li>${escapeHTML(item)}</li>`).join("")}</ul>` : "<p class=\"placeholder\">없음</p>"}
+    <h3>문맥상 강조 문장</h3>
+    ${contextItems.length ? `<ul>${contextItems.map((item) => `<li>${escapeHTML(item)}</li>`).join("")}</ul>` : "<p class=\"placeholder\">없음</p>"}
   `;
 
   repeatList.innerHTML = `
     <h3>반복된 항목</h3>
     ${repeatedItems.length ? `<ul>${repeatedItems.map((item) => `<li>${escapeHTML(item)}</li>`).join("")}</ul>` : "<p class=\"placeholder\">없음</p>"}
-  `;
-};
-
-const renderRules = () => {
-  rulesList.innerHTML = `
-    <h3>감지 규칙</h3>
-    <ul>
-      <li>굵게/기울임/밑줄/하이라이트/HTML 강조 태그</li>
-      <li>문맥상 강조 키워드: ${emphasisKeywords.join(", ")}</li>
-      <li>반복 단어: 최소 ${minRepeatInput.value}회 이상</li>
-    </ul>
   `;
 };
 
@@ -247,10 +292,6 @@ const analyzeText = () => {
   const minRepeat = Math.max(2, Number(minRepeatInput.value) || 2);
   const minToken = Math.max(2, Number(minTokenInput.value) || 2);
 
-  const emphasisRanges = emphasisPatterns.flatMap((pattern) =>
-    collectRangesFromPattern(text, pattern.regex, pattern.label, "emphasis")
-  );
-
   const contextRanges = contextPatterns.flatMap((pattern) =>
     collectRangesFromPattern(text, pattern.regex, pattern.label, "context")
   );
@@ -266,7 +307,6 @@ const analyzeText = () => {
   }));
 
   const mergedRanges = mergeRanges([
-    ...emphasisRanges,
     ...contextRanges,
     ...sentenceRanges,
     ...repeatRangeObjects,
@@ -274,9 +314,6 @@ const analyzeText = () => {
 
   highlightedOutput.innerHTML = highlightText(text, mergedRanges);
 
-  const emphasisItems = emphasisRanges
-    .map((range) => `${range.label}: ${range.snippet}`)
-    .slice(0, 20);
   const contextItems = [...contextRanges, ...sentenceRanges]
     .map((range) => `${range.label}: ${range.snippet}`)
     .slice(0, 20);
@@ -288,16 +325,12 @@ const analyzeText = () => {
 
   renderSummary(
     {
-      emphasis: emphasisRanges.length,
       context: contextRanges.length + sentenceRanges.length,
       repeat: repeatedItems.length,
     },
-    [...emphasisItems, ...contextItems],
+    contextItems,
     repeatedItems
   );
-
-  renderRules();
 };
 
 analyzeBtn.addEventListener("click", analyzeText);
-renderRules();

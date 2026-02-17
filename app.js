@@ -307,25 +307,94 @@ const buildHighlightedHTML = (text, contextRanges, repeatRanges) => {
 
 const collectRepeatedTokens = (text, minCount, minToken) => {
   const tokenRegex = /[A-Za-z][A-Za-z'\-]{1,}|[가-힣]{2,}/g;
-  const counts = new Map();
-  const entries = [];
+  const unigramCounts = new Map();
+  const phraseCounts = new Map();
+  const tokens = [];
   let match = null;
 
   while ((match = tokenRegex.exec(text)) !== null) {
     const token = match[0];
     const normalized = normalizeToken(token);
-    if (!normalized) continue;
-    if (normalized.length < minToken) continue;
-    if (stopwords.has(normalized)) continue;
-    counts.set(normalized, (counts.get(normalized) || 0) + 1);
-    entries.push({ start: match.index, end: match.index + token.length, token, normalized });
+    const valid =
+      normalized &&
+      normalized.length >= minToken &&
+      !stopwords.has(normalized);
+    tokens.push({
+      start: match.index,
+      end: match.index + token.length,
+      token,
+      normalized,
+      valid,
+    });
+    if (!valid) continue;
+    unigramCounts.set(normalized, (unigramCounts.get(normalized) || 0) + 1);
   }
 
-  const ranges = entries
-    .filter((entry) => counts.get(entry.normalized) >= minCount)
-    .map((entry) => ({ start: entry.start, end: entry.end }));
+  for (let i = 0; i < tokens.length - 1; i += 1) {
+    const current = tokens[i];
+    const next = tokens[i + 1];
+    if (!current.valid || !next.valid) continue;
+    const gap = text.slice(current.end, next.start);
+    if (!/^\s+$/.test(gap)) continue;
+    const phraseKey = `${current.normalized} ${next.normalized}`;
+    phraseCounts.set(phraseKey, (phraseCounts.get(phraseKey) || 0) + 1);
+  }
 
-  return { counts, ranges };
+  const repeatedPhrases = new Set(
+    Array.from(phraseCounts.entries())
+      .filter(([_, count]) => count >= minCount)
+      .map(([key]) => key)
+  );
+
+  const repeatedPhraseTokens = new Set();
+  repeatedPhrases.forEach((key) => {
+    key.split(" ").forEach((token) => repeatedPhraseTokens.add(token));
+  });
+
+  const phraseRanges = [];
+  const usedTokenIndexes = new Set();
+  for (let i = 0; i < tokens.length - 1; i += 1) {
+    const current = tokens[i];
+    const next = tokens[i + 1];
+    if (!current.valid || !next.valid) continue;
+    const gap = text.slice(current.end, next.start);
+    if (!/^\s+$/.test(gap)) continue;
+    const phraseKey = `${current.normalized} ${next.normalized}`;
+    if (!repeatedPhrases.has(phraseKey)) continue;
+    phraseRanges.push({
+      start: current.start,
+      end: next.end,
+      phraseKey,
+    });
+    usedTokenIndexes.add(i);
+    usedTokenIndexes.add(i + 1);
+  }
+
+  const unigramRanges = tokens
+    .map((token, index) => ({ token, index }))
+    .filter(({ token, index }) =>
+      token.valid &&
+      unigramCounts.get(token.normalized) >= minCount &&
+      !usedTokenIndexes.has(index)
+    )
+    .map(({ token }) => ({ start: token.start, end: token.end }));
+
+  const repeatedPhraseItems = Array.from(phraseCounts.entries())
+    .filter(([_, count]) => count >= minCount)
+    .sort((a, b) => b[1] - a[1])
+    .map(([phrase, count]) => ({ label: phrase, count }));
+
+  const repeatedTokenItems = Array.from(unigramCounts.entries())
+    .filter(([token, count]) => count >= minCount && !repeatedPhraseTokens.has(token))
+    .sort((a, b) => b[1] - a[1])
+    .map(([token, count]) => ({ label: token, count }));
+
+  return {
+    phraseRanges,
+    unigramRanges,
+    repeatedPhraseItems,
+    repeatedTokenItems,
+  };
 };
 
 const renderSummary = (stats, contextItems, repeatedItems) => {
@@ -366,7 +435,8 @@ const analyzeText = () => {
   const sentenceRanges = collectContextSentenceRanges(text);
   const allContextRanges = [...contextRanges, ...sentenceRanges];
 
-  const { counts, ranges: repeatRanges } = collectRepeatedTokens(text, minRepeat, minToken);
+  const repeatData = collectRepeatedTokens(text, minRepeat, minToken);
+  const repeatRanges = [...repeatData.phraseRanges, ...repeatData.unigramRanges];
   const repeatRangeObjects = repeatRanges.map((range) => ({
     ...range,
     label: "반복",
@@ -379,11 +449,14 @@ const analyzeText = () => {
   const contextItems = allContextRanges
     .map((range) => `${range.label}: ${range.snippet}`)
     .slice(0, 20);
-  const repeatedItems = Array.from(counts.entries())
-    .filter(([_, count]) => count >= minRepeat)
-    .sort((a, b) => b[1] - a[1])
-    .map(([token, count]) => `${token} (${count}회)`)
-    .slice(0, 30);
+  const repeatedItems = [
+    ...repeatData.repeatedPhraseItems.map(
+      (item) => `${item.label} (${item.count}회)`
+    ),
+    ...repeatData.repeatedTokenItems.map(
+      (item) => `${item.label} (${item.count}회)`
+    ),
+  ].slice(0, 30);
 
   renderSummary(
     {
